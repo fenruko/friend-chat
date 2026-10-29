@@ -18,6 +18,12 @@ loom {
 	}
 }
 
+repositories {
+	mavenCentral()
+	// Simple Voice Chat's own Maven, where its Concentus build is published
+	maven { url = "https://maven.maxhenkel.de/repository/public" }
+}
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
