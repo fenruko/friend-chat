@@ -1,0 +1,19 @@
+{
+	"schemaVersion": 1,
+	"id": "friendchat",
+	"version": "${version}",
+	"name": "Friend Chat",
+	"description": "A light, private friends list and chat for Minecraft: DMs, group chats, voice notes, pictures and files, with online / in-game / offline status. No account needed (works offline-mode too) and no server of your own: it talks over public Nostr relays, end-to-end encrypted.",
+	"authors": ["fenruko"],
+	"license": "MIT",
+	"environment": "client",
+	"entrypoints": {
+		"client": ["friendchat.client.FriendChatClient"]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": ">=26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
