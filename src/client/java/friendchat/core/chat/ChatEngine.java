@@ -53,6 +53,8 @@ public final class ChatEngine implements ChatBackend {
     public static final int OFFLINE = 0, ONLINE = 1, IN_GAME = 2;
     private static final long PRESENCE_TTL_MS = 150_000;
     private static final int KEEP = 500, MAX_DOWNLOAD = 40 * 1024 * 1024;
+    /** Encrypted blobs up to this size travel inside the (already encrypted) message itself: no storage server needed. */
+    static final int INLINE_MAX = 24 * 1024;
 
     private final Path dir;
     private final FcConfig cfg;
@@ -604,23 +606,50 @@ public final class ChatEngine implements ChatBackend {
             byte[] key = Nip44.newKey();
             byte[] blob = Nip44.seal(key, plain);
             String csha = PreparedAttachment.sha256Hex(blob);
-            String url = Blossom.upload(http, cfg.blossomList(), new Blossom.Signer(sk, me), blob, csha);
-            Media done = new Media(type, url, Base64.getEncoder().encodeToString(key), pending.sha(), csha, mime, name, w, h, ms, plain.length);
+            String keyB64 = Base64.getEncoder().encodeToString(key);
+            String wireUrl, localUrl;
+            if (blob.length <= INLINE_MAX) {
+                storeBlob(csha, blob);
+                wireUrl = "data:application/octet-stream;base64," + Base64.getEncoder().encodeToString(blob);
+                localUrl = LOCAL + csha;
+            } else {
+                wireUrl = localUrl = Blossom.upload(http, cfg.blossomList(), new Blossom.Signer(sk, me), blob, csha);
+            }
+            Media wireMedia = new Media(type, wireUrl, keyB64, pending.sha(), csha, mime, name, w, h, ms, plain.length);
+            Media localMedia = new Media(type, localUrl, keyB64, pending.sha(), csha, mime, name, w, h, ms, plain.length);
             ses.execute(() -> {
                 Map<String, Object> p = payload("media", id);
-                p.put("media", done.toMap());
+                p.put("media", wireMedia.toMap());
                 boolean ok = post(convKey, p);
-                replaceMessage(convKey, local.withMedia(done, ok ? Models.SENT : Models.FAILED), true);
+                replaceMessage(convKey, local.withMedia(localMedia, ok ? Models.SENT : Models.FAILED), true);
             });
         } catch (IOException | RuntimeException e) {
+            System.err.println("[friend-chat] upload failed: " + e);
             ses.execute(() -> replaceMessage(convKey, local.withState(Models.FAILED), true));
             toasts.push("Upload failed", String.valueOf(e.getMessage()), Toasts.ERROR);
         }
     }
 
+    private static final String LOCAL = "local:";
+
+    private Path blobFile(String csha) {
+        return dir.resolve("blobs").resolve(csha);
+    }
+
+    private void storeBlob(String csha, byte[] blob) throws IOException {
+        Files.createDirectories(dir.resolve("blobs"));
+        Files.write(blobFile(csha), blob);
+    }
+
     private byte[] fetch(Media m) throws IOException {
-        if (m.key().isEmpty() || m.cipherSha().length() != 64) throw new IOException("no media to fetch");
-        byte[] blob = Blossom.download(http, m.url(), cfg.blossomList(), m.cipherSha(), MAX_DOWNLOAD);
+        if (m.key().isEmpty() || !m.cipherSha().matches("[0-9a-f]{64}")) throw new IOException("no media to fetch");
+        byte[] blob;
+        if (m.url().startsWith(LOCAL) && Files.isRegularFile(blobFile(m.cipherSha()))) {
+            blob = Files.readAllBytes(blobFile(m.cipherSha()));
+            if (!PreparedAttachment.sha256Hex(blob).equals(m.cipherSha())) throw new IOException("stored file is damaged");
+        } else {
+            blob = Blossom.download(http, m.url().startsWith(LOCAL) ? "" : m.url(), cfg.blossomList(), m.cipherSha(), MAX_DOWNLOAD);
+        }
         byte[] plain = Nip44.open(Base64.getDecoder().decode(m.key()), blob);
         if (plain == null || !PreparedAttachment.sha256Hex(plain).equalsIgnoreCase(m.sha())) throw new IOException("file was corrupted or tampered with");
         return plain;
@@ -686,6 +715,16 @@ public final class ChatEngine implements ChatBackend {
             }
             case "media" -> {
                 Media m = Media.fromMap(Json.obj(p.get("media")));
+                if (m != null && m.url().startsWith("data:") && m.cipherSha().matches("[0-9a-f]{64}")) {
+                    try {
+                        byte[] blob = Base64.getDecoder().decode(m.url().substring(m.url().indexOf(',') + 1));
+                        if (blob.length > INLINE_MAX + 64 || !PreparedAttachment.sha256Hex(blob).equals(m.cipherSha())) return;
+                        storeBlob(m.cipherSha(), blob);
+                        m = new Media(m.type(), LOCAL + m.cipherSha(), m.key(), m.sha(), m.cipherSha(), m.mime(), m.name(), m.w(), m.h(), m.ms(), m.size());
+                    } catch (IOException | IllegalArgumentException ex) {
+                        return;
+                    }
+                }
                 if (m != null && m.cipherSha().length() == 64) addMessage(convKey, new Msg(id, e.createdAt(), from, display, false, "", m, Models.SENT), true);
             }
             case "ginv" -> {

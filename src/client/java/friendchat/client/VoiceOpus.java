@@ -27,7 +27,7 @@ final class VoiceOpus implements VoiceIo {
         TargetDataLine line = (TargetDataLine) AudioSystem.getLine(new DataLine.Info(TargetDataLine.class, FORMAT));
         line.open(FORMAT, FRAME * 2 * 6);
         OpusEncoder enc = new OpusEncoder(RATE, 1, OpusApplication.OPUS_APPLICATION_VOIP);
-        enc.setBitrate(24000);
+        enc.setBitrate(16000); // ~2 KB/s: about 12 s of voice still fits inside the message itself
         enc.setComplexity(5);
         line.start();
         return new Rec(line, enc);

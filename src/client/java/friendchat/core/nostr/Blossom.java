@@ -41,22 +41,32 @@ public final class Blossom {
                         .PUT(HttpRequest.BodyPublishers.ofByteArray(blob)).build();
                 HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
                 if (res.statusCode() / 100 != 2) {
-                    last = new IOException(base + " answered " + res.statusCode());
+                    String why = res.headers().firstValue("X-Reason").orElse(res.body() == null ? "" : res.body());
+                    why = why.replaceAll("\\s+", " ").trim();
+                    last = new IOException(host(base) + " said " + res.statusCode() + (why.isEmpty() ? "" : ": " + (why.length() > 60 ? why.substring(0, 60) : why)));
                     continue;
                 }
                 Map<String, Object> o = Json.obj(Json.parse(res.body()));
                 String url = Json.str(o, "url", null);
                 return url != null && url.startsWith("http") ? url : base + "/" + sha256Hex;
             } catch (IOException e) {
-                last = e;
+                last = new IOException(host(base) + ": " + e.getMessage());
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("interrupted");
             } catch (RuntimeException e) {
-                last = new IOException(e.getMessage());
+                last = new IOException(host(base) + ": " + e.getMessage());
             }
         }
         throw last;
+    }
+
+    private static String host(String url) {
+        try {
+            return URI.create(url).getHost();
+        } catch (RuntimeException e) {
+            return url;
+        }
     }
 
     /** Downloads a blob from its URL, falling back to the same hash on the other servers; verifies the hash. */

@@ -13,7 +13,7 @@ import java.util.Properties;
 public final class FcConfig {
     public String name = "";
     public String relays = "wss://relay.damus.io,wss://nos.lol,wss://relay.primal.net";
-    public String blossom = "https://blossom.primal.net,https://cdn.satellite.earth";
+    public String blossom = "https://blossom.primal.net,https://cdn.hzrd149.com";
     public String theme = "PURPLE";
     public int pixelSize = 1;
     public boolean toasts = true;
